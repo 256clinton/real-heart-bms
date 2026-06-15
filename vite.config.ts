@@ -1,15 +1,18 @@
 import { defineConfig } from "vite";
-import { tanstackStartVite } from "@tanstack/start-vite";
+import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
   plugins: [
-    // This plugin acts as the bridge for Tailwind, Nitro, and routing 
-    tanstackStartVite({
+    tanstackStart({
       server: {
-        entry: "server", // Keeps your custom src/server.ts redirect intact
+        entry: "server", 
       },
     }),
-    tsconfigPaths(), // Keeps your clean path aliases working
+    react(), 
+    tailwindcss(), // This activates the Tailwind v4 compiler for your utility classes!
+    tsconfigPaths(), 
   ],
 });
