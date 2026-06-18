@@ -6,8 +6,10 @@ import { clamp, rand } from "@/lib/bms/utils";
 export type FleetAsset = {
   id: string;
   rider: string;
-  x: number; y: number;
-  vx: number; vy: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
   size: number;
   risk: "ok" | "warn" | "danger";
   soc: number;
@@ -16,13 +18,17 @@ export type FleetAsset = {
   lng: number;
 };
 
-const RIDER_NAMES = ["Mukasa J.", "Nakato A.", "Okello B.", "Ssemakula P.", "Auma G.", "Kato M.", "Nansubuga L.", "Wasswa T."];
+const RIDER_NAMES = [
+  "Mukasa J.", "Nakato A.", "Okello B.", "Ssemakula P.", 
+  "Auma G.", "Kato M.", "Nansubuga L.", "Wasswa T."
+];
 
-// Kampala center
+// Kampala operational center baseline coordinates
 const KLA_LAT = 0.3476;
 const KLA_LNG = 32.5825;
 
-const GOOGLE_MAPS_API_KEY = "AIzaSyB6dlRAi8zwzkcvwheumAfQjxmd7UmsN5I";
+// Securely access configuration environments to prevent security credential tracing
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
 
 export function useFleet(count = 38, paused = false) {
   const [assets, setAssets] = useState<FleetAsset[]>(() =>
@@ -41,38 +47,62 @@ export function useFleet(count = 38, paused = false) {
       lng: KLA_LNG + rand(-0.06, 0.06),
     })),
   );
+
   useEffect(() => {
-    const i = setInterval(() => {
-      if (paused) return;
+    if (paused) return;
+
+    const interval = setInterval(() => {
       setAssets((prev) =>
-        prev.map((a) => {
-          let nx = a.x + a.vx;
-          let ny = a.y + a.vy;
-          let vx = a.vx, vy = a.vy;
+        prev.map((asset) => {
+          let nx = asset.x + asset.vx;
+          let ny = asset.y + asset.vy;
+          let vx = asset.vx;
+          let vy = asset.vy;
+
+          // Boundary collision tracking vectors
           if (nx < 3 || nx > 97) { vx = -vx; nx = clamp(nx, 3, 97); }
           if (ny < 5 || ny > 95) { vy = -vy; ny = clamp(ny, 5, 95); }
-          let risk = a.risk;
+
+          let risk = asset.risk;
           if (Math.random() < 0.01) {
             risk = Math.random() < 0.1 ? "danger" : Math.random() < 0.25 ? "warn" : "ok";
           }
+
           return {
-            ...a, x: nx, y: ny, vx, vy, risk,
-            soc: clamp(a.soc + rand(-0.3, 0.1), 5, 100),
-            speed: clamp(a.speed + rand(-3, 3), 0, 60),
-            lat: a.lat + rand(-0.0004, 0.0004),
-            lng: a.lng + rand(-0.0004, 0.0004),
+            ...asset,
+            x: nx,
+            y: ny,
+            vx,
+            vy,
+            risk,
+            soc: clamp(asset.soc + rand(-0.3, 0.1), 5, 100),
+            speed: clamp(asset.speed + rand(-3, 3), 0, 60),
+            lat: asset.lat + rand(-0.0004, 0.0004),
+            lng: asset.lng + rand(-0.0004, 0.0004),
           };
-        }),
+        })
       );
     }, 600);
-    return () => clearInterval(i);
+
+    return () => clearInterval(interval);
   }, [paused]);
+
   return assets;
 }
 
 export function FleetMap({
-  assets, selectedId, onSelect, height = "h-72", showAnomalies = true,
-}: { assets: FleetAsset[]; selectedId?: string | null; onSelect?: (id: string) => void; height?: string; showAnomalies?: boolean }) {
+  assets,
+  selectedId,
+  onSelect,
+  height = "h-72",
+  showAnomalies = true,
+}: {
+  assets: FleetAsset[];
+  selectedId?: string | null;
+  onSelect?: (id: string) => void;
+  height?: string;
+  showAnomalies?: boolean;
+}) {
   const online = assets.filter((a) => a.risk !== "danger").length;
   const anomaly = assets.filter((a) => a.risk === "warn").length;
   const locked = assets.filter((a) => a.risk === "danger").length;
@@ -81,11 +111,14 @@ export function FleetMap({
     if (!showAnomalies) return [];
     const danger = assets.filter((a) => a.risk === "danger");
     const pairs: [FleetAsset, FleetAsset][] = [];
+    
     for (let i = 0; i < danger.length; i++) {
       for (let j = i + 1; j < danger.length; j++) {
         const dx = danger[i].x - danger[j].x;
         const dy = danger[i].y - danger[j].y;
-        if (Math.sqrt(dx * dx + dy * dy) < 25) pairs.push([danger[i], danger[j]]);
+        if (Math.sqrt(dx * dx + dy * dy) < 25) {
+          pairs.push([danger[i], danger[j]]);
+        }
       }
     }
     return pairs;
@@ -169,6 +202,7 @@ export function FleetMap({
             />
           );
         })}
+        
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
           <div className="relative">
             <div className="h-3 w-3 rounded-full bg-accent" />
@@ -203,11 +237,17 @@ export function FleetDetail({ asset }: { asset: FleetAsset | null }) {
       </div>
     );
   }
+
   const color =
     asset.risk === "danger" ? "text-destructive"
     : asset.risk === "warn" ? "text-warn"
     : "text-primary";
-  const mapSrc = `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${asset.lat},${asset.lng}&zoom=15`;
+
+  // Official dynamic map initialization source URI layout maps
+  const embedMapUrl = GOOGLE_MAPS_API_KEY 
+    ? `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${asset.lat},${asset.lng}&zoom=15`
+    : `https://maps.google.com/maps?q=${asset.lat},${asset.lng}&z=15&output=embed`;
+
   return (
     <div className="panel p-5">
       <div className="flex items-center justify-between">
@@ -227,11 +267,11 @@ export function FleetDetail({ asset }: { asset: FleetAsset | null }) {
         <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2 flex items-center gap-1">
           <MapPin className="h-3 w-3" /> Live Location
         </div>
-        <div className="overflow-hidden rounded-md border border-border">
+        <div className="overflow-hidden rounded-md border border-border bg-muted/20">
           <iframe
             key={asset.id}
             title={`Map for ${asset.id}`}
-            src={mapSrc}
+            src={embedMapUrl}
             width="100%"
             height="220"
             style={{ border: 0 }}
@@ -254,7 +294,11 @@ export function FleetDetail({ asset }: { asset: FleetAsset | null }) {
 }
 
 export function FleetControls({
-  paused, onTogglePause, showAnomalies, onToggleAnomalies, status,
+  paused,
+  onTogglePause,
+  showAnomalies,
+  onToggleAnomalies,
+  status,
 }: {
   paused: boolean;
   onTogglePause: () => void;
