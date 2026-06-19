@@ -14,16 +14,193 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      authorized_chargers: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          id: string
+          label: string | null
+          pubkey: string
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          id: string
+          label?: string | null
+          pubkey: string
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          label?: string | null
+          pubkey?: string
+        }
+        Relationships: []
+      }
+      events: {
+        Row: {
+          created_by: string | null
+          id: number
+          kind: string
+          message: string
+          meta: Json
+          pack_id: string | null
+          severity: string
+          ts: string
+        }
+        Insert: {
+          created_by?: string | null
+          id?: number
+          kind: string
+          message: string
+          meta?: Json
+          pack_id?: string | null
+          severity?: string
+          ts?: string
+        }
+        Update: {
+          created_by?: string | null
+          id?: number
+          kind?: string
+          message?: string
+          meta?: Json
+          pack_id?: string | null
+          severity?: string
+          ts?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "events_pack_id_fkey"
+            columns: ["pack_id"]
+            isOneToOne: false
+            referencedRelation: "packs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      packs: {
+        Row: {
+          chemistry: string
+          created_at: string
+          id: string
+          last_seen: string
+          lat: number
+          lng: number
+          pubkey: string | null
+          rider: string | null
+          soc: number
+          soh: number
+          status: string
+        }
+        Insert: {
+          chemistry?: string
+          created_at?: string
+          id: string
+          last_seen?: string
+          lat: number
+          lng: number
+          pubkey?: string | null
+          rider?: string | null
+          soc?: number
+          soh?: number
+          status?: string
+        }
+        Update: {
+          chemistry?: string
+          created_at?: string
+          id?: string
+          last_seen?: string
+          lat?: number
+          lng?: number
+          pubkey?: string | null
+          rider?: string | null
+          soc?: number
+          soh?: number
+          status?: string
+        }
+        Relationships: []
+      }
+      telemetry_frames: {
+        Row: {
+          cells: Json
+          current_a: number | null
+          id: number
+          pack_id: string
+          power_w: number | null
+          risk_score: number | null
+          rssi: number | null
+          rtt_ms: number | null
+          ts: string
+        }
+        Insert: {
+          cells: Json
+          current_a?: number | null
+          id?: number
+          pack_id: string
+          power_w?: number | null
+          risk_score?: number | null
+          rssi?: number | null
+          rtt_ms?: number | null
+          ts?: string
+        }
+        Update: {
+          cells?: Json
+          current_a?: number | null
+          id?: number
+          pack_id?: string
+          power_w?: number | null
+          risk_score?: number | null
+          rssi?: number | null
+          rtt_ms?: number | null
+          ts?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "telemetry_frames_pack_id_fkey"
+            columns: ["pack_id"]
+            isOneToOne: false
+            referencedRelation: "packs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "fleet_admin" | "operator"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +327,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "fleet_admin", "operator"],
+    },
   },
 } as const
