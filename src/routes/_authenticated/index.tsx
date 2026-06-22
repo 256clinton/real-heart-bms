@@ -39,6 +39,7 @@ import {
 } from "@/components/bms/views";
 import { DbChargersPanel } from "@/components/bms/db-chargers-panel";
 import { usePacks, useDbEvents } from "@/hooks/use-bms";
+import { useBmsRealtime } from "@/hooks/use-bms-realtime";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated/")({
@@ -57,6 +58,7 @@ export const Route = createFileRoute("/_authenticated/")({
 
 function BMS() {
   const navigate = useNavigate();
+  useBmsRealtime();
   const [paused, setPaused] = useState(false);
   const [showAnomalies, setShowAnomalies] = useState(true);
   const { frame, status } = useTelemetryStream("/api/telemetry/stream", { paused });
