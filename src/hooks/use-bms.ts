@@ -11,116 +11,206 @@ import {
 } from "@/lib/bms/bms.functions";
 import type { FleetAsset } from "@/components/bms/fleet";
 
-// Project lat/lng into 0..100 canvas coords used by FleetMap.
-// Kampala-ish bounding box; deterministic so dots don't jump on refetch.
-const LAT_MIN = 0.25;
-const LAT_MAX = 0.45;
-const LNG_MIN = 32.48;
-const LNG_MAX = 32.7;
+// ==========================================
+// 1. CONFIGURATION & GEOSPATIAL PROJECTION
+// ==========================================
+const KAMPALA_BOUNDS = {
+  LAT_MIN: 0.25,
+  LAT_MAX: 0.45,
+  LNG_MIN: 32.48,
+  LNG_MAX: 32.7,
+} as const;
 
-function packToAsset(p: {
+interface RawPack {
   id: string;
   rider: string | null;
   lat: number;
   lng: number;
   status: string;
   soc: number | string;
-}): FleetAsset {
-  const xRaw = ((p.lng - LNG_MIN) / (LNG_MAX - LNG_MIN)) * 100;
-  const yRaw = (1 - (p.lat - LAT_MIN) / (LAT_MAX - LAT_MIN)) * 100;
-  const x = Math.max(3, Math.min(97, xRaw));
-  const y = Math.max(5, Math.min(95, yRaw));
-  const risk: FleetAsset["risk"] =
-    p.status === "danger" || p.status === "locked"
-      ? "danger"
-      : p.status === "warn" || p.status === "offline"
-        ? "warn"
-        : "ok";
+}
+
+/**
+ * Projects real-world GPS coordinates into localized 2D bounding space.
+ * Includes sanitization boundaries to protect against invalid/NaN input data.
+ */
+function packToAsset(p: RawPack): FleetAsset {
+  const lat = Number(p.lat) || KAMPALA_BOUNDS.LAT_MIN;
+  const lng = Number(p.lng) || KAMPALA_BOUNDS.LNG_MIN;
+
+  const xRaw = ((lng - KAMPALA_BOUNDS.LNG_MIN) / (KAMPALA_BOUNDS.LNG_MAX - KAMPALA_BOUNDS.LNG_MIN)) * 100;
+  const yRaw = (1 - (lat - KAMPALA_BOUNDS.LAT_MIN) / (KAMPALA_BOUNDS.LAT_MAX - KAMPALA_BOUNDS.LAT_MIN)) * 100;
+
+  // Enforce structural canvas padding constraints
+  const x = Math.max(3, Math.min(97, isNaN(xRaw) ? 50 : xRaw));
+  const y = Math.max(5, Math.min(95, isNaN(yRaw) ? 50 : yRaw));
+
+  const riskMap: Record<string, FleetAsset["risk"]> = {
+    danger: "danger",
+    locked: "danger",
+    warn: "warn",
+    offline: "warn",
+  };
+
   return {
     id: p.id,
-    rider: p.rider ?? "—",
+    rider: p.rider?.trim() || "Unassigned Rider",
     x,
     y,
     vx: 0,
     vy: 0,
     size: 2.5,
-    risk,
-    soc: Number(p.soc),
+    risk: riskMap[p.status] || "ok",
+    soc: Math.max(0, Math.min(100, Number(p.soc) || 0)),
     speed: 0,
-    lat: p.lat,
-    lng: p.lng,
+    lat,
+    lng,
   };
 }
 
+// ==========================================
+// 2. QUERY KEY FACTORY (Maintainability Pattern)
+// ==========================================
+export const bmsQueryKeys = {
+  all: ["bms"] as const,
+  packs: () => [...bmsQueryKeys.all, "packs"] as const,
+  events: (limit?: number) => [...bmsQueryKeys.all, "events", { limit }] as const,
+  chargers: () => [...bmsQueryKeys.all, "chargers"] as const,
+};
+
+// ==========================================
+// 3. ADVANCED HOOK IMPLEMENTATIONS
+// ==========================================
+
 export function usePacks() {
-  const fn = useServerFn(listPacks);
-  const q = useQuery({
-    queryKey: ["packs"],
-    queryFn: () => fn(),
+  const fetchPacksFn = useServerFn(listPacks);
+  
+  const query = useQuery({
+    queryKey: bmsQueryKeys.packs(),
+    queryFn: () => fetchPacksFn(),
     refetchInterval: 15_000,
     staleTime: 10_000,
+    placeholderData: (previousData) => previousData, // Smooth UI transitions during background refetches
   });
+
   const assets = useMemo<FleetAsset[]>(
-    () => (q.data ?? []).map(packToAsset),
-    [q.data],
+    () => (query.data ?? []).map((p: RawPack) => packToAsset(p)),
+    [query.data]
   );
-  return { assets, isLoading: q.isLoading, error: q.error };
+
+  return { 
+    assets, 
+    isLoading: query.isLoading, 
+    isRefetching: query.isRefetching,
+    error: query.error 
+  };
 }
 
-export function useDbEvents() {
-  const fn = useServerFn(listEvents);
+export function useDbEvents(limit = 30) {
+  const fetchEventsFn = useServerFn(listEvents);
+  
   return useQuery({
-    queryKey: ["events"],
-    queryFn: () => fn({ data: { limit: 30 } }),
+    queryKey: bmsQueryKeys.events(limit),
+    queryFn: () => fetchEventsFn({ data: { limit } }),
     refetchInterval: 10_000,
+    staleTime: 5_000,
   });
 }
 
 export function useChargers() {
-  const fn = useServerFn(listChargers);
+  const fetchChargersFn = useServerFn(listChargers);
+  
   return useQuery({
-    queryKey: ["chargers"],
-    queryFn: () => fn(),
+    queryKey: bmsQueryKeys.chargers(),
+    queryFn: () => fetchChargersFn(),
     refetchInterval: 30_000,
   });
 }
 
+/**
+ * Advanced Mutation: Uses Optimistic Updates to instantly flip state toggles
+ */
 export function useToggleCharger() {
-  const fn = useServerFn(setChargerEnabled);
-  const qc = useQueryClient();
+  const toggleChargerFn = useServerFn(setChargerEnabled);
+  const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: (input: { id: string; enabled: boolean }) =>
-      fn({ data: input }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["chargers"] });
-      qc.invalidateQueries({ queryKey: ["events"] });
+    mutationFn: (input: { id: string; enabled: boolean }) => toggleChargerFn({ data: input }),
+    
+    // Step 1: Execute immediate local cache update before API hits server
+    onMutate: async (variables) => {
+      await queryClient.cancelQueries({ queryKey: bmsQueryKeys.chargers() });
+      const previousChargers = queryClient.getQueryData(bmsQueryKeys.chargers());
+
+      queryClient.setQueryData(bmsQueryKeys.chargers(), (old: any) => 
+        old?.map((charger: any) => 
+          charger.id === variables.id ? { ...charger, enabled: variables.enabled } : charger
+        )
+      );
+
+      return { previousChargers };
+    },
+    // Step 2: Rollback to previous state if the network or database throws an error
+    onError: (_err, _variables, context) => {
+      if (context?.previousChargers) {
+        queryClient.setQueryData(bmsQueryKeys.chargers(), context.previousChargers);
+      }
+    },
+    // Step 3: Enforce definitive sync upon completion
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: bmsQueryKeys.chargers() });
+      queryClient.invalidateQueries({ queryKey: bmsQueryKeys.events() });
     },
   });
 }
 
+/**
+ * Advanced Mutation: Instantly updates fleet assets array when a pack is locked down
+ */
 export function useLockdownPack() {
-  const fn = useServerFn(lockdownPack);
-  const qc = useQueryClient();
+  const lockdownPackFn = useServerFn(lockdownPack);
+  const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: (input: { packId: string; arm: boolean }) =>
-      fn({ data: input }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["packs"] });
-      qc.invalidateQueries({ queryKey: ["events"] });
+    mutationFn: (input: { packId: string; arm: boolean }) => lockdownPackFn({ data: input }),
+    
+    onMutate: async (variables) => {
+      await queryClient.cancelQueries({ queryKey: bmsQueryKeys.packs() });
+      const previousPacks = queryClient.getQueryData(bmsQueryKeys.packs());
+
+      queryClient.setQueryData(bmsQueryKeys.packs(), (old: any) =>
+        old?.map((pack: any) =>
+          pack.id === variables.packId ? { ...pack, status: variables.arm ? "locked" : "ok" } : pack
+        )
+      );
+
+      return { previousPacks };
+    },
+    onError: (_err, _variables, context) => {
+      if (context?.previousPacks) {
+        queryClient.setQueryData(bmsQueryKeys.packs(), context.previousPacks);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: bmsQueryKeys.packs() });
+      queryClient.invalidateQueries({ queryKey: bmsQueryKeys.events() });
     },
   });
 }
 
 export function useLogEvent() {
-  const fn = useServerFn(logEvent);
-  const qc = useQueryClient();
+  const logEventFn = useServerFn(logEvent);
+  const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: (input: {
       packId?: string;
       kind: string;
       severity?: "info" | "warn" | "danger";
       message: string;
-    }) => fn({ data: input }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["events"] }),
+    }) => logEventFn({ data: input }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: bmsQueryKeys.events() });
+    },
   });
 }
